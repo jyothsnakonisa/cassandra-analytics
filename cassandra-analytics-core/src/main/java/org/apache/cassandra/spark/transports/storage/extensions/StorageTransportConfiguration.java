@@ -19,8 +19,6 @@
 
 package org.apache.cassandra.spark.transports.storage.extensions;
 
-import java.io.Serializable;
-import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -29,71 +27,93 @@ import java.util.Objects;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
+import org.apache.cassandra.spark.bulkwriter.cloudstorage.coordinated.MultiClusterContainer;
+import org.apache.cassandra.spark.transports.storage.StorageAccessConfiguration;
 import org.apache.cassandra.spark.transports.storage.StorageCredentialPair;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * Holds information about the Blob configuration
+ * Holds information about the cloud storage configuration
  */
-public class StorageTransportConfiguration implements Serializable
+public class StorageTransportConfiguration
 {
-    private static final long serialVersionUID = -8164878804296039585L;
-    private final String writeBucket;
-    private final String writeRegion;
-    private final String readBucket;
-    private final String readRegion;
     private final String prefix;
-    private final Map<String, String> tags;
-    private StorageCredentialPair storageCredentialPair;
+    private final Map<String, String> objectTags;
+    // many read access configurations
+    private final MultiClusterContainer<StorageAccessConfiguration> readAccessConfigurations;
+    // one write access configuration
+    private StorageAccessConfiguration writeAccessConfiguration;
 
+    // Same constructor for backward compatibility
     public StorageTransportConfiguration(String writeBucket, String writeRegion,
                                          String readBucket, String readRegion,
                                          String prefix,
                                          StorageCredentialPair storageCredentialPair,
-                                         Map<String, String> tags)
+                                         Map<String, String> objectTags)
     {
-        this.writeBucket = writeBucket;
-        this.writeRegion = writeRegion;
-        this.readBucket = readBucket;
-        this.readRegion = readRegion;
+        this(prefix, objectTags,
+             new StorageAccessConfiguration(writeRegion, writeBucket, storageCredentialPair.writeCredentials),
+             new MultiClusterContainer<>());
+        StorageAccessConfiguration readAccess = new StorageAccessConfiguration(readRegion, readBucket, storageCredentialPair.readCredentials);
+        readAccessConfigurations.setValue(null, readAccess);
+    }
+
+    // Constructor for coordinated-write use case
+    public StorageTransportConfiguration(String prefix,
+                                         Map<String, String> objectTags,
+                                         StorageAccessConfiguration writeAccessConfiguration,
+                                         Map<String, StorageAccessConfiguration> readAccessConfigByCluster)
+    {
+        this(prefix, objectTags, writeAccessConfiguration, new MultiClusterContainer<>());
+        this.readAccessConfigurations.addAll(readAccessConfigByCluster);
+    }
+
+    private StorageTransportConfiguration(String prefix,
+                                          Map<String, String> objectTags,
+                                          StorageAccessConfiguration writeAccessConfiguration,
+                                          MultiClusterContainer<StorageAccessConfiguration> readAccessConfigurations)
+    {
         this.prefix = prefix;
-        this.storageCredentialPair = storageCredentialPair;
-        this.tags = Collections.unmodifiableMap(tags);
+        this.writeAccessConfiguration = writeAccessConfiguration;
+        this.readAccessConfigurations = readAccessConfigurations;
+        this.objectTags = Collections.unmodifiableMap(objectTags);
     }
 
-    /**
-     * @return the base {@link URI} to use for accessing the storage transport
-     */
-    public String getWriteBucket()
+    public StorageAccessConfiguration writeAccessConfiguration()
     {
-        return writeBucket;
+        return writeAccessConfiguration;
     }
 
     /**
+     * @param clusterId cluster id. Cluster id must present for coordinated write; otherwise, it is null
+     * @return read access configuration
+     */
+    public StorageAccessConfiguration readAccessConfiguration(@Nullable String clusterId)
+    {
+        return readAccessConfigurations.getValueOrNull(clusterId);
+    }
+
+    /**
+     * @param clusterId cluster id. Cluster id must present for coordinated write; otherwise, it is null
      * @return a map of access tokens used to authenticate to the storage transport
      */
-    public StorageCredentialPair getStorageCredentialPair()
+    public StorageCredentialPair getStorageCredentialPair(@Nullable String clusterId)
     {
-        return storageCredentialPair;
+        StorageAccessConfiguration readAccess = readAccessConfigurations.getValueOrThrow(clusterId);
+        return new StorageCredentialPair(writeAccessConfiguration.region(),
+                                         writeAccessConfiguration.storageCredentials(),
+                                         readAccess.region(),
+                                         readAccess.storageCredentials());
     }
 
-    public void setBlobCredentialPair(StorageCredentialPair newCredentials)
+    /**
+     * @param clusterId cluster id. Cluster id must present for coordinated write; otherwise, it is null
+     * @param newCredentials new set of access tokens
+     */
+    public void setStorageCredentialPair(@Nullable String clusterId, StorageCredentialPair newCredentials)
     {
-        this.storageCredentialPair = newCredentials;
-    }
-
-    public String getWriteRegion()
-    {
-        return writeRegion;
-    }
-
-    public String getReadBucket()
-    {
-        return readBucket;
-    }
-
-    public String getReadRegion()
-    {
-        return readRegion;
+        writeAccessConfiguration = writeAccessConfiguration.copyWithNewCredentials(newCredentials.writeCredentials);
+        readAccessConfigurations.updateValue(clusterId, readAccess -> readAccess.copyWithNewCredentials(newCredentials.readCredentials));
     }
 
     public String getPrefix()
@@ -101,9 +121,9 @@ public class StorageTransportConfiguration implements Serializable
         return prefix;
     }
 
-    public Map<String, String> getTags()
+    public Map<String, String> getObjectTags()
     {
-        return tags;
+        return objectTags;
     }
 
     public boolean equals(Object o)
@@ -117,43 +137,34 @@ public class StorageTransportConfiguration implements Serializable
             return false;
         }
         StorageTransportConfiguration that = (StorageTransportConfiguration) o;
-        return Objects.equals(writeBucket, that.writeBucket)
-               && Objects.equals(writeRegion, that.writeRegion)
-               && Objects.equals(readBucket, that.readBucket)
-               && Objects.equals(readRegion, that.readRegion)
-               && Objects.equals(prefix, that.prefix)
-               && Objects.equals(storageCredentialPair, that.storageCredentialPair)
-               && Objects.equals(tags, that.tags);
+        return Objects.equals(prefix, that.prefix)
+               && Objects.equals(objectTags, that.objectTags)
+               && Objects.equals(writeAccessConfiguration, that.writeAccessConfiguration)
+               && Objects.equals(readAccessConfigurations, that.readAccessConfigurations);
     }
 
     public int hashCode()
     {
-        return Objects.hash(writeBucket, writeRegion, readBucket, readRegion, prefix, storageCredentialPair, tags);
+        return Objects.hash(prefix, objectTags, writeAccessConfiguration, readAccessConfigurations);
     }
 
     public static class Serializer extends com.esotericsoftware.kryo.Serializer<StorageTransportConfiguration>
     {
         public void write(Kryo kryo, Output out, StorageTransportConfiguration obj)
         {
-            out.writeString(obj.writeBucket);
-            out.writeString(obj.writeRegion);
-            out.writeString(obj.readBucket);
-            out.writeString(obj.readRegion);
             out.writeString(obj.prefix);
-            kryo.writeObject(out, obj.storageCredentialPair);
-            kryo.writeObject(out, obj.tags);
+            kryo.writeObject(out, obj.objectTags);
+            kryo.writeObject(out, obj.writeAccessConfiguration);
+            kryo.writeObject(out, obj.readAccessConfigurations);
         }
 
         @SuppressWarnings("unchecked")
         public StorageTransportConfiguration read(Kryo kryo, Input in, Class<StorageTransportConfiguration> type)
         {
             return new StorageTransportConfiguration(in.readString(),
-                                                     in.readString(),
-                                                     in.readString(),
-                                                     in.readString(),
-                                                     in.readString(),
-                                                     kryo.readObject(in, StorageCredentialPair.class),
-                                                     kryo.readObject(in, HashMap.class));
+                                                     kryo.readObject(in, HashMap.class),
+                                                     kryo.readObject(in, StorageAccessConfiguration.class),
+                                                     kryo.readObject(in, MultiClusterContainer.class));
         }
     }
 }

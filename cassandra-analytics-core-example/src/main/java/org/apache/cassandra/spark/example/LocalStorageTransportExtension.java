@@ -109,16 +109,18 @@ public class LocalStorageTransportExtension implements StorageTransportExtension
 
     private StorageCredentialPair generateTokens()
     {
-        return new StorageCredentialPair(new StorageCredentials("writeKey",
+        return new StorageCredentialPair("writeRegion",
+                                         new StorageCredentials("writeKey",
                                                                 "writeSecret",
                                                                 "writeSessionToken"),
+                                         "readRegion",
                                          new StorageCredentials("readKey",
                                                                 "readSecret",
                                                                 "readSessionToken"));
     }
 
     @Override
-    public void onStageSucceeded(String clusterId, long objectsCount, long rowsCount, long elapsedMillis)
+    public void onStageSucceeded(String clusterId, long elapsedMillis)
     {
         LOGGER.info("Job {} has all objects staged at cluster {} after {}ms", jobId, clusterId, elapsedMillis);
     }
@@ -130,13 +132,13 @@ public class LocalStorageTransportExtension implements StorageTransportExtension
     }
 
     @Override
-    public void onApplySucceeded(String clusterId, long objectsCount, long rowsCount, long elapsedMillis)
+    public void onImportSucceeded(String clusterId, long elapsedMillis)
     {
-        LOGGER.info("Job {} has all objects applied at cluster {} after {}ms", jobId, clusterId, elapsedMillis);
+        LOGGER.info("Job {} has all objects imported at cluster {} after {}ms", jobId, clusterId, elapsedMillis);
     }
 
     @Override
-    public void onApplyFailed(String clusterId, Throwable cause)
+    public void onImportFailed(String clusterId, Throwable cause)
     {
         LOGGER.error("Cluster {} failed to apply objects", clusterId, cause);
     }

@@ -33,11 +33,11 @@ import org.apache.cassandra.spark.bulkwriter.CassandraBulkSourceRelation;
  *     <li>Extension invokes {@link CoordinationSignalListener#onStageReady(String)},
  *     when it decides it is time to stage SSTables on all clusters.</li>
  *     <li>Cassandra Analytics calls Sidecars to stage data.
- *     {@link #onStageSucceeded(String, long, long, long)} is called per cluster to notify the extension.</li>
- *     <li>Extension invokes {@link CoordinationSignalListener#onApplyReady(String)},
+ *     {@link #onStageSucceeded(String, long)} is called per cluster to notify the extension.</li>
+ *     <li>Extension invokes {@link CoordinationSignalListener#onImportReady(String)},
  *     when it decides it is time to apply/import SSTables on all clusters.</li>
  *     <li>Cassandra Analytics calls Sidecars to import data.
- *     {@link #onApplySucceeded(String, long, long, long)} is called per cluster to notify the extension.</li>
+ *     {@link #onImportSucceeded(String, long)} is called per cluster to notify the extension.</li>
  *     <li>{@link DriverStorageTransportExtension#onAllObjectsPersisted(long, long, long)}
  *     is called to indicate the completion.</li>
  * </ol>
@@ -49,11 +49,9 @@ interface CoordinatedTransportExtension
      * The callback should only be invoked once per cluster
      *
      * @param clusterId identifies a Cassandra cluster
-     * @param objectsCount the total count of the objects
-     * @param rowsCount the total count of the rows
      * @param elapsedMillis the elapsed time from the start of the bulk write run in milliseconds
      */
-    void onStageSucceeded(String clusterId, long objectsCount, long rowsCount, long elapsedMillis);
+    void onStageSucceeded(String clusterId, long elapsedMillis);
 
     /**
      * Notifies the {@link CoordinatedTransportExtension} implementation that it fails to stage objects on the cluster.
@@ -65,24 +63,22 @@ interface CoordinatedTransportExtension
     void onStageFailed(String clusterId, Throwable cause);
 
     /**
-     * Notifies the {@link CoordinatedTransportExtension} implementation that all objects have been applied on the cluster.
+     * Notifies the {@link CoordinatedTransportExtension} implementation that all objects have been imported into the cluster.
      * The callback should only be invoked once per cluster
      *
      * @param clusterId identifies a Cassandra cluster
-     * @param objectsCount the total count of the objects
-     * @param rowsCount the total count of the rows
      * @param elapsedMillis the elapsed time from the start of the bulk write run in milliseconds
      */
-    void onApplySucceeded(String clusterId, long objectsCount, long rowsCount, long elapsedMillis);
+    void onImportSucceeded(String clusterId, long elapsedMillis);
 
     /**
-     * Notifies the {@link CoordinatedTransportExtension} implementation that it fails to apply objects on the cluster.
+     * Notifies the {@link CoordinatedTransportExtension} implementation that it fails to import objects into the cluster.
      * The callback should only be invoked once per cluster
      *
      * @param clusterId identifies a Cassandra cluster
      * @param cause failure
      */
-    void onApplyFailed(String clusterId, Throwable cause);
+    void onImportFailed(String clusterId, Throwable cause);
 
     /**
      * Set the {@link CoordinationSignalListener} to receive coordination signals from {@link CoordinatedTransportExtension} implementation

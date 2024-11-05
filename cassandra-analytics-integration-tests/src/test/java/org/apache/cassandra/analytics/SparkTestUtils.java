@@ -29,6 +29,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -86,6 +87,11 @@ public class SparkTestUtils
         this.dnsResolver = Objects.requireNonNull(dnsResolver, "dnsResolver is required");
         this.mtlsTestHelper = Objects.requireNonNull(mtlsTestHelper, "mtlsTestHelper is required");
         this.sidecarPort = sidecarPort;
+    }
+
+    public void setMtlsTestHelper(MtlsTestHelper mtlsTestHelper)
+    {
+        this.mtlsTestHelper = Objects.requireNonNull(mtlsTestHelper);
     }
 
     /**
@@ -159,6 +165,20 @@ public class SparkTestUtils
                  .mode("append");
     }
 
+    public DataFrameWriter<Row> coordinatedBulkWriterDataFrameWriter(Dataset<Row> df, QualifiedName tableName,
+                                                                     Map<String, String> additionalOptions)
+    {
+        return df.write()
+                 .format("org.apache.cassandra.spark.sparksql.CassandraDataSink")
+                 .option("keyspace", tableName.keyspace())
+                 .option("table", tableName.table())
+                 .option("bulk_writer_cl", "LOCAL_QUORUM")
+                 .option("number_splits", "-1")
+                 .options(additionalOptions)
+                 .options(mtlsTestHelper.mtlOptionMap())
+                 .mode("append");
+    }
+
     public SparkConf defaultSparkConf()
     {
         SparkConf sparkConf = new SparkConf()
@@ -211,7 +231,7 @@ public class SparkTestUtils
         Throwable thrown = catchThrowable(dfWriter::save);
 
         assertThat(thrown).isInstanceOf(RuntimeException.class)
-                          .hasMessageContaining("java.lang.RuntimeException: Bulk Write to Cassandra has failed");
+                          .hasMessageContaining("Bulk Write to Cassandra has failed");
 
         Throwable cause = thrown;
 
@@ -231,6 +251,11 @@ public class SparkTestUtils
      */
     protected String sidecarInstancesOption(ICluster<? extends IInstance> cluster, DnsResolver dnsResolver)
     {
+        return sidecarInstancesOptionStream(cluster, dnsResolver).collect(Collectors.joining(","));
+    }
+
+    public static Stream<String> sidecarInstancesOptionStream(ICluster<? extends IInstance> cluster, DnsResolver dnsResolver)
+    {
         return IntStream.rangeClosed(1, cluster.size())
                         .mapToObj(i -> {
                             String ipAddress = JMXUtil.getJmxHost(cluster.get(i).config());
@@ -242,7 +267,6 @@ public class SparkTestUtils
                             {
                                 return ipAddress;
                             }
-                        })
-                        .collect(Collectors.joining(","));
+                        });
     }
 }
