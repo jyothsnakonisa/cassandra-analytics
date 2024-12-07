@@ -47,12 +47,7 @@ import com.google.common.base.Preconditions;
 
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.Serializer;
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.CompositeType;
@@ -67,7 +62,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableTombstoneWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -98,6 +92,8 @@ import org.apache.cassandra.spark.utils.SparkClassLoaderOverride;
 import org.apache.cassandra.spark.utils.TimeProvider;
 import org.apache.cassandra.tools.JsonTransformer;
 import org.apache.cassandra.tools.Util;
+import org.apache.cassandra.util.CompressionUtil;
+import org.apache.cassandra.utils.CompressionUtilImplementation;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 import org.jetbrains.annotations.NotNull;
@@ -106,8 +102,6 @@ import org.jetbrains.annotations.Nullable;
 @SuppressWarnings("unused")
 public class CassandraBridgeImplementation extends CassandraBridge
 {
-    private static volatile boolean setup = false;
-
     private final Map<Class<?>, Serializer<?>> kryoSerializers;
 
     public static void main(String[] args)
@@ -118,59 +112,12 @@ public class CassandraBridgeImplementation extends CassandraBridge
 
     static
     {
-        CassandraBridgeImplementation.setup();
+        setup();
     }
 
     public static synchronized void setup()
     {
-        if (!CassandraBridgeImplementation.setup)
-        {
-            // We never want to enable mbean registration in the Cassandra code we use so disable it here
-            System.setProperty("org.apache.cassandra.disable_mbean_registration", "true");
-            Config.setClientMode(true);
-            // When we create a TableStreamScanner, we will set the partitioner directly on the table metadata
-            // using the supplied IIndexStreamScanner.Partitioner. CFMetaData::compile requires a partitioner to
-            // be set in DatabaseDescriptor before we can do that though, so we set one here in preparation.
-            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-            DatabaseDescriptor.clientInitialization();
-            Config config = DatabaseDescriptor.getRawConfig();
-            config.memtable_flush_writers = 8;
-            config.diagnostic_events_enabled = false;
-            config.max_mutation_size_in_kb = config.commitlog_segment_size_in_mb * 1024 / 2;
-            config.concurrent_compactors = 4;
-            Path tempDirectory;
-            try
-            {
-                tempDirectory = Files.createTempDirectory(UUID.randomUUID().toString());
-            }
-            catch (IOException exception)
-            {
-                throw new RuntimeException(exception);
-            }
-            config.data_file_directories = new String[]{tempDirectory.toString()};
-            setupCommitLogConfigs(tempDirectory);
-            DatabaseDescriptor.setEndpointSnitch(new SimpleSnitch());
-            Keyspace.setInitialized();
-
-            setup = true;
-        }
-    }
-
-    public static void setupCommitLogConfigs(Path path)
-    {
-        String commitLogPath = path + "/commitlog";
-        DatabaseDescriptor.getRawConfig().commitlog_directory = commitLogPath;
-        DatabaseDescriptor.getRawConfig().hints_directory = path + "/hints";
-        DatabaseDescriptor.getRawConfig().saved_caches_directory = path + "/saved_caches";
-        DatabaseDescriptor.setCommitLogSync(Config.CommitLogSync.periodic);
-        DatabaseDescriptor.setCommitLogCompression(new ParameterizedClass("LZ4Compressor",
-                                                                          Collections.emptyMap()));
-        DatabaseDescriptor.setCommitLogSyncPeriod(30);
-        DatabaseDescriptor.setCommitLogMaxCompressionBuffersPerPool(3);
-        DatabaseDescriptor.setCommitLogSyncGroupWindow(30);
-        DatabaseDescriptor.setCommitLogSegmentSize(32);
-        DatabaseDescriptor.getRawConfig().commitlog_total_space_in_mb = 1024;
-        DatabaseDescriptor.setCommitLogSegmentMgrProvider(commitLog -> new CommitLogSegmentManagerStandard(commitLog, commitLogPath));
+        CassandraTypesImplementation.setup();
     }
 
     public CassandraBridgeImplementation()
@@ -305,9 +252,16 @@ public class CassandraBridgeImplementation extends CassandraBridge
                                 Partitioner partitioner,
                                 Set<String> udts,
                                 @Nullable UUID tableId,
-                                int indexCount)
+                                int indexCount,
+                                boolean enableCdc)
     {
-        return new SchemaBuilder(createStatement, keyspace, replicationFactor, partitioner, cassandraTypes -> udts, tableId, indexCount).build();
+        return new SchemaBuilder(createStatement, keyspace, replicationFactor, partitioner, cassandraTypes -> udts, tableId, indexCount, enableCdc).build();
+    }
+
+    @Override
+    public CompressionUtil compressionUtil()
+    {
+        return CompressionUtilImplementation.INSTANCE;
     }
 
     @Override
