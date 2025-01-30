@@ -62,6 +62,7 @@ import o.a.c.sidecar.client.shaded.common.response.ListSnapshotFilesResponse;
 import o.a.c.sidecar.client.shaded.common.response.NodeSettings;
 import o.a.c.sidecar.client.shaded.common.response.RingResponse;
 import o.a.c.sidecar.client.shaded.common.response.SchemaResponse;
+import org.apache.cassandra.analytics.stats.Stats;
 import org.apache.cassandra.bridge.BigNumberConfig;
 import org.apache.cassandra.bridge.BigNumberConfigImpl;
 import org.apache.cassandra.bridge.CassandraBridge;
@@ -86,7 +87,6 @@ import org.apache.cassandra.spark.data.partitioner.Partitioner;
 import org.apache.cassandra.spark.data.partitioner.TokenPartitioner;
 import org.apache.cassandra.spark.sparksql.LastModifiedTimestampDecorator;
 import org.apache.cassandra.spark.sparksql.RowBuilder;
-import org.apache.cassandra.analytics.stats.Stats;
 import org.apache.cassandra.spark.utils.CqlUtils;
 import org.apache.cassandra.spark.utils.ReaderTimeProvider;
 import org.apache.cassandra.spark.utils.ScalaFunctions;
@@ -96,6 +96,7 @@ import org.apache.cassandra.spark.validation.CassandraValidation;
 import org.apache.cassandra.spark.validation.SidecarValidation;
 import org.apache.cassandra.spark.validation.StartupValidatable;
 import org.apache.cassandra.spark.validation.StartupValidator;
+import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.util.ShutdownHookManager;
 import org.jetbrains.annotations.NotNull;
@@ -1017,9 +1018,9 @@ public class CassandraDataLayer extends PartitionedDataLayer implements StartupV
             }
 
             @Override
-            public RowBuilder decorate(RowBuilder builder)
+            public <T extends InternalRow> RowBuilder<T> decorate(RowBuilder<T> builder)
             {
-                return new LastModifiedTimestampDecorator(builder, alias);
+                return new LastModifiedTimestampDecorator<>(builder, alias);
             }
 
             @Override
