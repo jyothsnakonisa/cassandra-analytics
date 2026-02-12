@@ -25,12 +25,9 @@ plugins {
     id('maven-publish')
 }
 
-sourceCompatibility = 1.8
+apply from: "$rootDir/gradle/common/publishing-non-spark.gradle"
 
-if (propertyWithDefault("artifactType", null) == "common")
-{
-    apply from: "$rootDir/gradle/common/publishing.gradle"
-}
+sourceCompatibility = 1.8
 
 test {
     useJUnitPlatform()

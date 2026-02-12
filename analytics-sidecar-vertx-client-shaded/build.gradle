@@ -105,42 +105,41 @@ ext {
 // archivesBaseName = "${project.name}"
 // present on the general gradle.build file to avoid having
 // analytics-sidecar-vertx-client-shaded_* as the artifact name
-archivesBaseName = "analytics-sidecar-vertx-client-all"
+archivesBaseName = "analytics-sidecar-vertx-client-shaded"
 
-if (propertyWithDefault("artifactType", null) == "common")
-{
-    publishing {
-        publications {
-            shadow(MavenPublication) { publication ->
-                project.shadow.component(publication)
-                groupId rootProject.group
-                artifactId "${archivesBaseName}"
-                version System.getenv("CODE_VERSION") ?: "${project.version}"
+publishing {
+    publications {
+        shadow(MavenPublication) { publication ->
+            project.shadow.component(publication)
+            groupId rootProject.group
+            artifactId "${archivesBaseName}"
+            version System.getenv("CODE_VERSION") ?: "${project.version}"
 
-                if (mavenRepositoryUrl != "") {
-                    pom {
-                        url = "https://cassandra.apache.org/"
-                        licenses {
-                            license {
-                                name = "The Apache License, Version 2.0"
-                                url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
-                                distribution = "repo"
-                            }
+            if (mavenRepositoryUrl != "") {
+                pom {
+                    url = "https://cassandra.apache.org/"
+                    licenses {
+                        license {
+                            name = "The Apache License, Version 2.0"
+                            url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                            distribution = "repo"
                         }
                     }
                 }
             }
         }
+    }
+
+    repositories {
+        mavenLocal()
 
         if (mavenRepositoryUrl != "") {
-            repositories {
-                maven {
-                    url = mavenRepositoryUrl
-                    if (mavenUsername != "" && mavenPassword != "") {
-                        credentials {
-                            username = mavenUsername
-                            password = mavenPassword
-                        }
+            maven {
+                url = mavenRepositoryUrl
+                if (mavenUsername != "" && mavenPassword != "") {
+                    credentials {
+                        username = mavenUsername
+                        password = mavenPassword
                     }
                 }
             }

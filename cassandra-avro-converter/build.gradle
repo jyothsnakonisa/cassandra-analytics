@@ -22,15 +22,13 @@ plugins {
     id('maven-publish')
 }
 
+apply from: "$rootDir/gradle/common/publishing-spark.gradle"
+
 configurations {
     all*.exclude(group: 'org.slf4j', module: 'slf4j-log4j12')
     all*.exclude(group: 'log4j', module: 'log4j')
 }
 
-if (propertyWithDefault("artifactType", null) == "spark")
-{
-    apply from: "$rootDir/gradle/common/publishing.gradle"
-}
 
 dependencies {
     api(project(':cassandra-bridge'))

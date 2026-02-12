@@ -24,15 +24,7 @@ plugins {
     id('maven-publish')
 }
 
-configurations {
-    all*.exclude(group: 'org.slf4j', module: 'slf4j-log4j12')
-    all*.exclude(group: 'log4j', module: 'log4j')
-}
-
-if (propertyWithDefault("artifactType", null) == "common")
-{
-    apply from: "$rootDir/gradle/common/publishing.gradle"
-}
+apply from: "$rootDir/gradle/common/publishing-non-spark.gradle"
 
 dependencies {
     compileOnly("com.google.guava:guava:${guavaVersion}")

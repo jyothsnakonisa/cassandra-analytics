@@ -26,10 +26,7 @@ plugins {
     id 'maven-publish'
 }
 
-if (propertyWithDefault("artifactType", null) == "spark")
-{
-    apply from: "$rootDir/gradle/common/publishing.gradle"
-}
+apply from: "$rootDir/gradle/common/publishing-spark.gradle"
 
 java {
     withJavadocJar()

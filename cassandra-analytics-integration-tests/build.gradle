@@ -27,10 +27,7 @@ plugins {
     id('maven-publish')
 }
 
-if (propertyWithDefault("artifactType", null) == "spark")
-{
-    apply from: "$rootDir/gradle/common/publishing.gradle"
-}
+apply from: "$rootDir/gradle/common/publishing-spark.gradle"
 
 def integrationMaxHeapSize = System.getenv("INTEGRATION_MAX_HEAP_SIZE") ?: "3000M"
 println("Using ${integrationMaxHeapSize} maxHeapSize")

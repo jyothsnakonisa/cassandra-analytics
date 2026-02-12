@@ -56,8 +56,10 @@ publishing {
         }
     }
 
-    if (mavenRepositoryUrl != "") {
-        repositories {
+    repositories {
+        mavenLocal()
+
+        if (mavenRepositoryUrl != "") {
             maven {
                 url = mavenRepositoryUrl
                 if (mavenUsername != "" && mavenPassword != "") {
