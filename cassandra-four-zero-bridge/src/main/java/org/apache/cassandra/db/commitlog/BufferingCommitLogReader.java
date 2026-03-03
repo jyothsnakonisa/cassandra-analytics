@@ -104,6 +104,7 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
     private RandomAccessReader reader;
     private CommitLogDescriptor desc = null;
     private boolean skipped = false;
+    private boolean reachedEndOfData = false;
 
     @VisibleForTesting
     public BufferingCommitLogReader(@NotNull CommitLog log,
@@ -284,6 +285,12 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
             {
                 stats.commitLogBytesSkippedOnRead(startMarker.position() - reader.getFilePointer());
                 segmentReader.seek(startMarker.position());
+                logger.info("Reading from segmentReader offset :" + startMarker.position());
+                // Update position to reflect where we seeked to.
+                // If startMarker.position == maxOffset (segment fully consumed before restart),
+                // the loop below will not execute and position would otherwise remain 0,
+                // causing isFullyRead to incorrectly evaluate as false.
+                this.position = startMarker.position();
             }
 
             for (CommitLogSegmentReader.SyncSegment syncSegment : segmentReader)
@@ -308,6 +315,13 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
                 {
                     break;
                 }
+            }
+
+            // If the segment reader iterator exhausted naturally (no error/break), we've read all real data
+            if (statusTracker.shouldContinue())
+            {
+                logger.info("Reached end of the commitlog file "+ log.name());
+                reachedEndOfData = true;
             }
         }
         // Unfortunately CommitLogSegmentReader.SegmentIterator (for-loop) cannot throw a checked exception,
@@ -427,6 +441,7 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
                 if (serializedSize == LEGACY_END_OF_SEGMENT_MARKER)
                 {
                     logger.trace("Encountered end of segment marker at", "position", reader.getFilePointer());
+                    reachedEndOfData = true;
                     statusTracker.requestTermination();
                     return;
                 }
@@ -634,6 +649,12 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
     public boolean skipped()
     {
         return skipped;
+    }
+
+    @Override
+    public boolean isNaturallyTerminated()
+    {
+        return reachedEndOfData;
     }
 
     /**

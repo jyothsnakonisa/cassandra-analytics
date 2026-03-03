@@ -35,6 +35,8 @@ public interface CommitLogReader
 
     boolean skipped();
 
+    default boolean isNaturallyTerminated() { return false; }
+
     class Result
     {
         private final List<PartitionUpdateWrapper> updates;
@@ -47,8 +49,8 @@ public interface CommitLogReader
             CommitLog log = reader.log();
             this.updates = reader.updates();
             this.marker = log.markerAt(reader.segmentId(), reader.position());
-            // commit log has been fully written to, and we have read upto the max offset in this BufferingCommitLogReader
-            this.isFullyRead = log.completed() && marker.position >= log.maxOffset();
+            // commit log has been fully written to, and we have naturally terminated or read up to the max offset
+            this.isFullyRead = log.completed() && (reader.isNaturallyTerminated() || marker.position >= log.maxOffset());
             this.skipped = reader.skipped();
         }
 
