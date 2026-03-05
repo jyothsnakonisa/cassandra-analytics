@@ -77,6 +77,15 @@ public interface StatePersister
     }
 
     /**
+     * Stop the StatePersister, flushing any buffered state to persistent storage before returning.
+     * Implementations that buffer state asynchronously must override this to ensure no state is lost on shutdown.
+     */
+    default void stop()
+    {
+        // no-op by default
+    }
+
+    /**
      * Load last CDC state from persistant storage after a bounce, restart or configuration change.
      * <p>
      * NOTE: this method may return 1 or more CDC state objects which may occur if there is a cluster

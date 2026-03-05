@@ -134,6 +134,7 @@ public class SidecarStatePersister implements StatePersister
     /**
      * Stop the SidecarStatePersister gracefully, blocking to await for any pending flushes to complete.
      */
+    @Override
     public void stop()
     {
         stop(true);
