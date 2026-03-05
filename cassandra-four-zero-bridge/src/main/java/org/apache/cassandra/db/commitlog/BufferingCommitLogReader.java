@@ -104,7 +104,6 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
     private RandomAccessReader reader;
     private CommitLogDescriptor desc = null;
     private boolean skipped = false;
-    private boolean reachedEndOfData = false;
 
     @VisibleForTesting
     public BufferingCommitLogReader(@NotNull CommitLog log,
@@ -285,11 +284,8 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
             {
                 stats.commitLogBytesSkippedOnRead(startMarker.position() - reader.getFilePointer());
                 segmentReader.seek(startMarker.position());
-                logger.info("Reading from segmentReader offset :" + startMarker.position());
-                // Update position to reflect where we seeked to.
-                // If startMarker.position == maxOffset (segment fully consumed before restart),
-                // the loop below will not execute and position would otherwise remain 0,
-                // causing isFullyRead to incorrectly evaluate as false.
+                // When starting from an offset, position must be initialized to startMarker.position()
+                // rather than 0; an incorrect value causes isFullyRead to fail.
                 this.position = startMarker.position();
             }
 
@@ -317,11 +313,11 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
                 }
             }
 
-            // If the segment reader iterator exhausted naturally (no error/break), we've read all real data
+            // If the segment reader iterator completes reading commitlog with padded zeros, set the position
+            // as maxOffset to mark completion of reading commitlog
             if (statusTracker.shouldContinue())
             {
-                logger.info("Reached end of the commitlog file "+ log.name());
-                reachedEndOfData = true;
+                this.position = (int) log.maxOffset();
             }
         }
         // Unfortunately CommitLogSegmentReader.SegmentIterator (for-loop) cannot throw a checked exception,
@@ -441,7 +437,7 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
                 if (serializedSize == LEGACY_END_OF_SEGMENT_MARKER)
                 {
                     logger.trace("Encountered end of segment marker at", "position", reader.getFilePointer());
-                    reachedEndOfData = true;
+                    this.position = (int) log.maxOffset();
                     statusTracker.requestTermination();
                     return;
                 }
@@ -649,12 +645,6 @@ public class BufferingCommitLogReader implements CommitLogReadHandler,
     public boolean skipped()
     {
         return skipped;
-    }
-
-    @Override
-    public boolean isNaturallyTerminated()
-    {
-        return reachedEndOfData;
     }
 
     /**
