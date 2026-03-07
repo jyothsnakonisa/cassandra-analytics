@@ -150,7 +150,7 @@ public class Cdc implements Closeable
         }
     }
 
-    public void stop()
+    private void stop()
     {
         try
         {
