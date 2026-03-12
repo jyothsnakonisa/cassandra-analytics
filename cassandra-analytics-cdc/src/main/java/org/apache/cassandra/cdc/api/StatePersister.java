@@ -77,6 +77,16 @@ public interface StatePersister
     }
 
     /**
+     * Flush any buffered state to persistent storage before returning.
+     * Called by {@link org.apache.cassandra.cdc.Cdc#close()} when a consumer closes or restarts,
+     * to ensure no state is lost.
+     */
+    default void flush()
+    {
+        // no-op by default
+    }
+
+    /**
      * Load last CDC state from persistant storage after a bounce, restart or configuration change.
      * <p>
      * NOTE: this method may return 1 or more CDC state objects which may occur if there is a cluster

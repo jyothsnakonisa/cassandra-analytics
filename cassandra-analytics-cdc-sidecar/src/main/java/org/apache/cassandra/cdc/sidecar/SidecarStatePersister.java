@@ -253,7 +253,8 @@ public class SidecarStatePersister implements StatePersister
     /**
      * Flush active state persist calls
      */
-    protected void flush()
+    @Override
+    public void flush()
     {
         // persist any buffered state and flush in-flight requests
         persistToCassandra(true);

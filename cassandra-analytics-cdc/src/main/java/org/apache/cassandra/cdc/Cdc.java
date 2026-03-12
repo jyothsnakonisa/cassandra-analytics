@@ -318,6 +318,18 @@ public class Cdc implements Closeable
                 eventConsumer.accept(event);
             }
 
+            // flush before persisting state; if delivery fails this throws,
+            // skipping persist() so the micro-batch is retried on the next run
+            try
+            {
+                eventConsumer.flush();
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted during event consumer flush", e);
+            }
+
             // persist end state
             CdcState endState = it.endState();
             persist(endState, tokenRange);
@@ -441,6 +453,13 @@ public class Cdc implements Closeable
     @Override
     public void close()
     {
-        this.stop();
+        try
+        {
+            this.stop();
+        }
+        finally
+        {
+            statePersister.flush();
+        }
     }
 }
