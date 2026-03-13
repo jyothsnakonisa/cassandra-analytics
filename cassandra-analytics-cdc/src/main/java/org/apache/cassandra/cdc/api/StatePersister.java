@@ -57,9 +57,8 @@ public interface StatePersister
      */
     void persist(String jobId, int partitionId, @Nullable TokenRange tokenRange, @NotNull ByteBuffer buf);
 
-
     /**
-     * Load last CDC state from persistant storage after a bounce, restart or configuration change
+     * Load last CDC state from persistent storage after a bounce, restart or configuration change
      * and merge into single canonical state object.
      *
      * @param jobId       unique identifier for CDC streaming job.
@@ -77,17 +76,15 @@ public interface StatePersister
     }
 
     /**
-     * Flush any buffered state to persistent storage before returning.
-     * Called by {@link org.apache.cassandra.cdc.Cdc#close()} when a consumer closes or restarts,
-     * to ensure no state is lost.
+     * Stops the persister, optionally blocking on a flush if the user requests it.
      */
-    default void flush()
+    default void stop(boolean flush)
     {
         // no-op by default
     }
 
     /**
-     * Load last CDC state from persistant storage after a bounce, restart or configuration change.
+     * Load last CDC state from persistent storage after a bounce, restart or configuration change.
      * <p>
      * NOTE: this method may return 1 or more CDC state objects which may occur if there is a cluster
      * topology change (expansion, shrink etc.) or the CDC partition begins from a new token range

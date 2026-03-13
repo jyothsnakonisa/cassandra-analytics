@@ -19,7 +19,6 @@
 
 package org.apache.cassandra.cdc;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
@@ -61,7 +60,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 @SuppressWarnings("unused") // external facing API
-public class Cdc implements Closeable
+public class Cdc implements AutoCloseable
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(Cdc.class);
 
@@ -136,8 +135,7 @@ public class Cdc implements Closeable
         TokenRange tokenRange = tokenRangeSupplier.get();
         this.currentState = statePersister.loadCanonicalState(jobId, partitionId, tokenRange);
 
-        if (!isRunning.get()
-            && isRunning.compareAndSet(false, true))
+        if (!isRunning.get() && isRunning.compareAndSet(false, true))
         {
             LOGGER.info("Starting CDC Consumer jobId={} partitionId={} lower={} upper={}",
                         jobId,
@@ -150,46 +148,6 @@ public class Cdc implements Closeable
         }
     }
 
-    public void stop()
-    {
-        try
-        {
-            stop(true);
-        }
-        catch (InterruptedException e)
-        {
-            Thread.currentThread().interrupt();
-        }
-        catch (ExecutionException e)
-        {
-            LOGGER.error("Failed to stop CDC consumer cleanly", ThrowableUtils.rootCause(e));
-        }
-    }
-
-    public void stop(boolean blocking) throws ExecutionException, InterruptedException
-    {
-        if (isRunning.get() && isRunning.compareAndSet(true, false))
-        {
-            LOGGER.info("Stopping CDC Consumer jobId={} partitionId={}", jobId, partitionId);
-            CompletableFuture<Void> activeFuture = active.get();
-            if (activeFuture != null && blocking)
-            {
-                // block until active future completes
-                long timeout = cdcOptions.stopTimeout().toMillis();
-                try
-                {
-                    activeFuture.get(timeout, TimeUnit.MILLISECONDS);
-                }
-                catch (TimeoutException e)
-                {
-                    LOGGER.warn("Failed to cleanly shutdown active future after {} millis", timeout);
-                    stats.cdcConsumerStopTimeout();
-                }
-            }
-            LOGGER.info("Stopped CDC Consumer jobId={} partitionId={}", jobId, partitionId);
-        }
-    }
-
     protected void scheduleNextRun()
     {
         scheduleRun(cdcOptions.nextDelayMillis(batchStartNanos));
@@ -198,9 +156,7 @@ public class Cdc implements Closeable
     protected void scheduleRun(long delayMillis)
     {
         if (!isRunning.get() || isFinished())
-        {
             return;
-        }
 
         active.getAndUpdate((curr) -> {
             if (curr == null)
@@ -259,19 +215,28 @@ public class Cdc implements Closeable
             {
                 LOGGER.error("CdcConsumer epoch failed with unrecoverable error jobId={} partition={} epoch={}",
                              jobId, partitionId, currentState.epoch, t);
-                stop();
+                // Ensure the future is completed before close(), even if the CAS in completeActiveFuture didn't fire
+                // (e.g. another thread swapped active). While today the close() call timeouts gracefully in the case
+                // where the future is still live, no guarantees going forward.
+                future.complete(null);
+
+                // We need to close here to tidy things up with our statePersister; we're in a bad state but want to
+                // at least flush out what we have if we can.
+                close();
             }
         }
     }
 
     /**
+     * We let Exceptions keep rolling, but Errors we die for.
+     *
      * @param t throwable
      * @return true if Cdc consumer can continue, or false if it should stop.
      */
     protected boolean handleError(Throwable t)
     {
         LOGGER.error("Unexpected error in CdcConsumer", t);
-        return true;
+        return !(t instanceof Error);
     }
 
     protected MicroBatchIterator newMicroBatchIterator() throws NotEnoughReplicasException
@@ -448,18 +413,58 @@ public class Cdc implements Closeable
         }
     }
 
-    // Closable
-
+    /**
+     * {@link AutoCloseable} interface
+     *
+     * We're responsible for both the Cdc lifecycle and the statePersister's lifecycle here; we need to durably handle
+     * both and decouple exception state from the Cdc shutdown interfering with the {@link #statePersister}
+     *
+     * By default, we block on the active flag for at least our basic timeout time to try and let active cdc processes
+     * finish.
+     */
     @Override
     public void close()
     {
-        try
+        // We want to tie the shutdown of the statePersister to the atomic sentinel for shutting down cdc as well
+        // so we don't end up with repeated calls to StatePersister.stop. It's cleanly idempotent today but no
+        // guarantees that'll hold in the future.
+        if (isRunning.compareAndSet(true, false))
         {
-            this.stop();
-        }
-        finally
-        {
-            statePersister.flush();
+            try
+            {
+                LOGGER.info("Stopping CDC Consumer jobId={} partitionId={}", jobId, partitionId);
+                CompletableFuture<Void> activeFuture = active.get();
+                if (activeFuture != null)
+                {
+                    // We want to give active futures some time to complete but not allow them to block forever.
+                    long timeout = cdcOptions.stopTimeout().toMillis();
+                    try
+                    {
+                        activeFuture.get(timeout, TimeUnit.MILLISECONDS);
+                    }
+                    catch (TimeoutException e)
+                    {
+                        LOGGER.warn("Failed to cleanly shutdown active future after {} millis", timeout);
+                        stats.cdcConsumerStopTimeout();
+                    }
+                }
+                LOGGER.info("Stopped CDC Consumer jobId={} partitionId={}", jobId, partitionId);
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+            }
+            catch (ExecutionException e)
+            {
+                LOGGER.error("Failed to stop CDC consumer cleanly", ThrowableUtils.rootCause(e));
+            }
+            finally
+            {
+                // Regardless of what happens with our Cdc processes, we always want to persist state to the DB.
+                // Exceptions are unhandled by design; if this fails, we want to bubble up the exception and let
+                // things Break Noisily.
+                statePersister.stop(true);
+            }
         }
     }
 }

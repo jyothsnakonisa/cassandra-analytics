@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.ThreadLocalMonotonicTimestampGenerator;
+
 import org.apache.cassandra.bridge.CdcBridgeFactory;
 import org.apache.cassandra.bridge.TokenRange;
 import org.apache.cassandra.cdc.CdcKryoRegister;
@@ -45,25 +46,29 @@ import org.apache.cassandra.cdc.state.CdcState;
 import org.apache.cassandra.spark.utils.AsyncExecutor;
 import org.apache.cassandra.spark.utils.ThrowableUtils;
 import org.apache.cassandra.util.CompressionUtil;
+
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * SidecarStatePersister buffers CDC state and flushes at regular time intervals, so we only write the latest CDC state and don't wastefully write expired data.
+ * SidecarStatePersister buffers CDC state and flushes at regular time intervals, so we only write the latest CDC state
+ * and don't wastefully write expired data.
  */
 public class SidecarStatePersister implements StatePersister
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(SidecarStatePersister.class);
 
-    // group latest state by jobId/token range, so we persist independently
-    protected final ConcurrentHashMap<PersistWrapper.Key, PersistWrapper> latestState = new ConcurrentHashMap<>();
-    protected final ConcurrentLinkedQueue<TimedFutureWrapper> activeFlush = new ConcurrentLinkedQueue<>();
+    /* We group latest state by jobId/token range, so we persist independently. */
+    private final ConcurrentHashMap<PersistWrapper.Key, PersistWrapper> latestState = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<TimedFutureWrapper> activeFlush = new ConcurrentLinkedQueue<>();
     private final ThreadLocalMonotonicTimestampGenerator timestampGenerator = new ThreadLocalMonotonicTimestampGenerator();
     private final SidecarCdcOptions sidecarCdcOptions;
     private final CdcOptions cdcOptions;
     private final SidecarCdcCassandraClient cassandraClient;
     private final SidecarCdcStats sidecarCdcStats;
     private final AsyncExecutor asyncExecutor;
+
+    @VisibleForTesting
     volatile long timerId = -1L;
 
     public SidecarStatePersister(SidecarCdcOptions sidecarCdcOptions,
@@ -78,8 +83,6 @@ public class SidecarStatePersister implements StatePersister
         this.cassandraClient = cassandraClient;
         this.asyncExecutor = asyncExecutor;
     }
-
-    // StatePersister implemented methods
 
     @Override
     public void persist(String jobId, int partitionId, @Nullable TokenRange tokenRange, @NotNull ByteBuffer buf)
@@ -132,18 +135,17 @@ public class SidecarStatePersister implements StatePersister
     }
 
     /**
-     * Stop the SidecarStatePersister gracefully, blocking to await for any pending flushes to complete.
+     * Stop the SidecarStatePersister gracefully, blocking to await for any pending flushes to complete if requested.
+     *
+     * The flushing process can throw and percolate exceptions up the stack and shut down the whole system; this is by
+     * design since if we can't persist state to the DB we have big, likely unrecoverable problems.
      */
-    public void stop()
-    {
-        stop(true);
-    }
-
+    @Override
     public synchronized void stop(boolean flush)
     {
+        // not running
         if (this.timerId < 0)
         {
-            // not running
             return;
         }
 
@@ -156,14 +158,12 @@ public class SidecarStatePersister implements StatePersister
         }
     }
 
-    // internal methods
-
-    protected void persistToCassandra()
+    private void persistToCassandra()
     {
         persistToCassandra(false);
     }
 
-    protected void persistToCassandra(boolean force)
+    private void persistToCassandra(boolean force)
     {
         // clean-up finished futures
         activeFlush.removeIf(wrapper -> {
@@ -219,7 +219,7 @@ public class SidecarStatePersister implements StatePersister
     }
 
     @Nullable
-    protected TimedFutureWrapper persistToCassandra(@NotNull PersistWrapper state)
+    private TimedFutureWrapper persistToCassandra(@NotNull PersistWrapper state)
     {
         TokenRange range = state.tokenRange();
         if (range == null)
@@ -251,18 +251,13 @@ public class SidecarStatePersister implements StatePersister
     }
 
     /**
-     * Flush active state persist calls
+     * Flushes, forcing persistence to the backing store. We expect and handle both ExecutionExceptions and
+     * InterruptedExceptions here, but anything else we're deliberately not handling and letting flow back up the call
+     * stack.
      */
-    @Override
-    public void flush()
+    private void flush()
     {
-        // persist any buffered state and flush in-flight requests
         persistToCassandra(true);
-        flushActiveSafe();
-    }
-
-    protected void flushActiveSafe()
-    {
         try
         {
             flushActive();
@@ -284,7 +279,7 @@ public class SidecarStatePersister implements StatePersister
      * @throws ExecutionException
      * @throws InterruptedException
      */
-    protected void flushActive() throws ExecutionException, InterruptedException
+    private void flushActive() throws ExecutionException, InterruptedException
     {
         for (TimedFutureWrapper wrapper : activeFlush)
         {
@@ -292,9 +287,7 @@ public class SidecarStatePersister implements StatePersister
         }
     }
 
-    // helper classes
-
-    protected static class PersistWrapper implements Comparable<PersistWrapper>
+    private static class PersistWrapper implements Comparable<PersistWrapper>
     {
         final String jobId;
         final int partitionId;
@@ -303,13 +296,12 @@ public class SidecarStatePersister implements StatePersister
         final ByteBuffer buf;
         final long timestamp;
 
-        protected static class Key
+        private static class Key
         {
             private final String jobId;
             private final TokenRange tokenRange;
 
-            protected Key(String jobId,
-                          TokenRange tokenRange)
+            private Key(String jobId, TokenRange tokenRange)
             {
                 this.jobId = jobId;
                 this.tokenRange = tokenRange;
@@ -333,16 +325,15 @@ public class SidecarStatePersister implements StatePersister
                 }
 
                 PersistWrapper.Key other = (PersistWrapper.Key) o;
-                return jobId.equals(other.jobId)
-                       && Objects.equals(tokenRange, other.tokenRange);
+                return jobId.equals(other.jobId) && Objects.equals(tokenRange, other.tokenRange);
             }
         }
 
-        protected PersistWrapper(String jobId,
-                                 int partitionId,
-                                 @Nullable TokenRange tokenRange,
-                                 ByteBuffer buf,
-                                 long timestamp)
+        private PersistWrapper(String jobId,
+                               int partitionId,
+                               @Nullable TokenRange tokenRange,
+                               ByteBuffer buf,
+                               long timestamp)
         {
             this.jobId = jobId;
             this.partitionId = partitionId;
@@ -378,14 +369,10 @@ public class SidecarStatePersister implements StatePersister
         public boolean equals(Object o)
         {
             if (this == o)
-            {
                 return true;
-            }
 
             if (o == null || getClass() != o.getClass())
-            {
                 return false;
-            }
 
             PersistWrapper other = (PersistWrapper) o;
             return jobId.equals(other.jobId)
@@ -396,24 +383,20 @@ public class SidecarStatePersister implements StatePersister
         public static PersistWrapper max(PersistWrapper w1, PersistWrapper w2)
         {
             if (w1 == null)
-            {
                 return w2;
-            }
             else if (w2 == null)
-            {
                 return w1;
-            }
 
             return w1.compareTo(w2) > 0 ? w1 : w2;
         }
     }
 
-    protected static class TimedFutureWrapper
+    private static class TimedFutureWrapper
     {
-        protected final List<ResultSetFuture> futures;
-        protected final long startTimeNanos;
+        private final List<ResultSetFuture> futures;
+        private final long startTimeNanos;
 
-        protected TimedFutureWrapper(List<ResultSetFuture> futures)
+        private TimedFutureWrapper(List<ResultSetFuture> futures)
         {
             this.futures = futures;
             this.startTimeNanos = System.nanoTime();

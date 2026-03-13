@@ -110,7 +110,7 @@ public class SidecarStatePersisterTest
         assertThat(result).hasSize(1);
         assertThat(result.get(0)).isEqualTo(data);
 
-        statePersister.stop();
+        statePersister.stop(true);
         assertThat(statePersister.timerId).isEqualTo(-1);
     }
 }
