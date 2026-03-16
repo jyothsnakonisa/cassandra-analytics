@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import org.apache.cassandra.cdc.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +39,15 @@ import org.apache.cassandra.bridge.CassandraBridge;
 import org.apache.cassandra.bridge.CdcBridge;
 import org.apache.cassandra.bridge.CdcBridgeFactory;
 import org.apache.cassandra.bridge.TokenRange;
+import org.apache.cassandra.cdc.api.CassandraSource;
+import org.apache.cassandra.cdc.api.CdcOptions;
+import org.apache.cassandra.cdc.api.CommitLogMarkers;
+import org.apache.cassandra.cdc.api.CommitLogProvider;
+import org.apache.cassandra.cdc.api.EventConsumer;
+import org.apache.cassandra.cdc.api.SchemaSupplier;
+import org.apache.cassandra.cdc.api.StatePersister;
+import org.apache.cassandra.cdc.api.TableIdLookup;
+import org.apache.cassandra.cdc.api.TokenRangeSupplier;
 import org.apache.cassandra.cdc.msg.CdcEvent;
 import org.apache.cassandra.cdc.state.CdcState;
 import org.apache.cassandra.cdc.stats.ICdcStats;
@@ -406,11 +414,8 @@ public class Cdc
     }
 
     /**
-     * We're responsible for both the Cdc lifecycle and the {@link #statePersister} lifecycle here; we need to durably
-     * handle both and decouple exception state from the Cdc shutdown interfering with the {@link #statePersister}
-     *
-     * By default, we block on the active flag for at least our basic timeout time to try and let active cdc processes
-     * finish.
+     * We flush the {@link #eventConsumer} in the {@link #active} future so we only need to make sure we durably persist
+     * in our {@link #statePersister} even if that path on the primary Cdc microbatch handling fails out for some reason.
      */
     public void stop()
     {

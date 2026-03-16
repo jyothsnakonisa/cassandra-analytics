@@ -30,7 +30,6 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.datastax.driver.core.exceptions.ReadTimeoutException;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,11 +56,11 @@ import org.jetbrains.annotations.Nullable;
  */
 public class SidecarStatePersister implements StatePersister
 {
-    private static final Logger LOGGER = LoggerFactory.getLogger(SidecarStatePersister.class);
+    protected static final Logger LOGGER = LoggerFactory.getLogger(SidecarStatePersister.class);
 
     /* We group latest state by jobId/token range, so we persist independently. */
-    private final ConcurrentHashMap<PersistWrapper.Key, PersistWrapper> latestState = new ConcurrentHashMap<>();
-    private final ConcurrentLinkedQueue<TimedFutureWrapper> activeFlush = new ConcurrentLinkedQueue<>();
+    protected final ConcurrentHashMap<PersistWrapper.Key, PersistWrapper> latestState = new ConcurrentHashMap<>();
+    protected final ConcurrentLinkedQueue<TimedFutureWrapper> activeFlush = new ConcurrentLinkedQueue<>();
     private final ThreadLocalMonotonicTimestampGenerator timestampGenerator = new ThreadLocalMonotonicTimestampGenerator();
     private final SidecarCdcOptions sidecarCdcOptions;
     private final CdcOptions cdcOptions;
@@ -135,6 +134,9 @@ public class SidecarStatePersister implements StatePersister
         this.timerId = asyncExecutor.periodicTimer(this::persistToCassandra, sidecarCdcOptions.persistDelay().toMillis());
     }
 
+    /**
+     * We keep our timer running and just block on a flush of persisting state to the DB
+     */
     public synchronized void persistBlocking()
     {
         flush();
@@ -160,12 +162,12 @@ public class SidecarStatePersister implements StatePersister
         flush();
     }
 
-    private void persistToCassandra()
+    protected void persistToCassandra()
     {
         persistToCassandra(false);
     }
 
-    private void persistToCassandra(boolean force)
+    protected void persistToCassandra(boolean force)
     {
         // clean-up finished futures
         activeFlush.removeIf(wrapper -> {
@@ -221,7 +223,7 @@ public class SidecarStatePersister implements StatePersister
     }
 
     @Nullable
-    private TimedFutureWrapper persistToCassandra(@NotNull PersistWrapper state)
+    protected TimedFutureWrapper persistToCassandra(@NotNull PersistWrapper state)
     {
         TokenRange range = state.tokenRange();
         if (range == null)
@@ -257,7 +259,7 @@ public class SidecarStatePersister implements StatePersister
      * InterruptedExceptions here, but anything else we're deliberately not handling and letting flow back up the call
      * stack. This includes timeouts, CL failures, or other exceptions from the C* DB we're persisting to.
      */
-    private void flush()
+    protected void flush()
     {
         persistToCassandra();
         try
@@ -281,7 +283,7 @@ public class SidecarStatePersister implements StatePersister
      * @throws ExecutionException
      * @throws InterruptedException
      */
-    private void flushActive() throws ExecutionException, InterruptedException
+    protected void flushActive() throws ExecutionException, InterruptedException
     {
         for (TimedFutureWrapper wrapper : activeFlush)
         {
@@ -289,7 +291,7 @@ public class SidecarStatePersister implements StatePersister
         }
     }
 
-    private static class PersistWrapper implements Comparable<PersistWrapper>
+    protected static class PersistWrapper implements Comparable<PersistWrapper>
     {
         final String jobId;
         final int partitionId;
@@ -298,12 +300,12 @@ public class SidecarStatePersister implements StatePersister
         final ByteBuffer buf;
         final long timestamp;
 
-        private static class Key
+        protected static class Key
         {
             private final String jobId;
             private final TokenRange tokenRange;
 
-            private Key(String jobId, TokenRange tokenRange)
+            protected Key(String jobId, TokenRange tokenRange)
             {
                 this.jobId = jobId;
                 this.tokenRange = tokenRange;
@@ -331,7 +333,7 @@ public class SidecarStatePersister implements StatePersister
             }
         }
 
-        private PersistWrapper(String jobId,
+        protected PersistWrapper(String jobId,
                                int partitionId,
                                @Nullable TokenRange tokenRange,
                                ByteBuffer buf,
@@ -371,10 +373,14 @@ public class SidecarStatePersister implements StatePersister
         public boolean equals(Object o)
         {
             if (this == o)
+            {
                 return true;
+            }
 
             if (o == null || getClass() != o.getClass())
+            {
                 return false;
+            }
 
             PersistWrapper other = (PersistWrapper) o;
             return jobId.equals(other.jobId)
@@ -385,20 +391,24 @@ public class SidecarStatePersister implements StatePersister
         public static PersistWrapper max(PersistWrapper w1, PersistWrapper w2)
         {
             if (w1 == null)
+            {
                 return w2;
+            }
             else if (w2 == null)
+            {
                 return w1;
+            }
 
             return w1.compareTo(w2) > 0 ? w1 : w2;
         }
     }
 
-    private static class TimedFutureWrapper
+    protected static class TimedFutureWrapper
     {
-        private final List<ResultSetFuture> futures;
-        private final long startTimeNanos;
+        protected final List<ResultSetFuture> futures;
+        protected final long startTimeNanos;
 
-        private TimedFutureWrapper(List<ResultSetFuture> futures)
+        protected TimedFutureWrapper(List<ResultSetFuture> futures)
         {
             this.futures = futures;
             this.startTimeNanos = System.nanoTime();
