@@ -44,6 +44,11 @@ public interface StatePersister
         {
             return Collections.singletonList(CdcState.BLANK);
         }
+
+        public void persistBlocking()
+        {
+            // No-op in STUB
+        }
     };
 
     /**
@@ -56,6 +61,11 @@ public interface StatePersister
      * @param buf         ByteBuffer with the serialized Iterator state.
      */
     void persist(String jobId, int partitionId, @Nullable TokenRange tokenRange, @NotNull ByteBuffer buf);
+
+    /**
+     * Will persist existing data, blocking on results back from wherever this data is durably retained.
+     */
+    void persistBlocking();
 
     /**
      * Load last CDC state from persistent storage after a bounce, restart or configuration change
@@ -76,9 +86,9 @@ public interface StatePersister
     }
 
     /**
-     * Stops the persister, optionally blocking on a flush if the user requests it.
+     * Stops the persister, optionally blocking.
      */
-    default void stop(boolean flush)
+    default void stop(boolean blocking)
     {
         // no-op by default
     }

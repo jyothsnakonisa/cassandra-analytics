@@ -30,6 +30,7 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.datastax.driver.core.exceptions.ReadTimeoutException;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -134,14 +135,18 @@ public class SidecarStatePersister implements StatePersister
         this.timerId = asyncExecutor.periodicTimer(this::persistToCassandra, sidecarCdcOptions.persistDelay().toMillis());
     }
 
+    public synchronized void persistBlocking()
+    {
+        flush();
+    }
+
     /**
      * Stop the SidecarStatePersister gracefully, blocking to await for any pending flushes to complete if requested.
      *
      * The flushing process can throw and percolate exceptions up the stack and shut down the whole system; this is by
      * design since if we can't persist state to the DB we have big, likely unrecoverable problems.
      */
-    @Override
-    public synchronized void stop(boolean flush)
+    public synchronized void stop()
     {
         // not running
         if (this.timerId < 0)
@@ -152,10 +157,7 @@ public class SidecarStatePersister implements StatePersister
         asyncExecutor.cancelTimer(this.timerId);
         this.timerId = -1;
 
-        if (flush)
-        {
-            flush();
-        }
+        flush();
     }
 
     private void persistToCassandra()
@@ -253,11 +255,11 @@ public class SidecarStatePersister implements StatePersister
     /**
      * Flushes, forcing persistence to the backing store. We expect and handle both ExecutionExceptions and
      * InterruptedExceptions here, but anything else we're deliberately not handling and letting flow back up the call
-     * stack.
+     * stack. This includes timeouts, CL failures, or other exceptions from the C* DB we're persisting to.
      */
     private void flush()
     {
-        persistToCassandra(true);
+        persistToCassandra();
         try
         {
             flushActive();

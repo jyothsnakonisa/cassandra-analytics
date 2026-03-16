@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.cdc.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,15 +40,6 @@ import org.apache.cassandra.bridge.CassandraBridge;
 import org.apache.cassandra.bridge.CdcBridge;
 import org.apache.cassandra.bridge.CdcBridgeFactory;
 import org.apache.cassandra.bridge.TokenRange;
-import org.apache.cassandra.cdc.api.CassandraSource;
-import org.apache.cassandra.cdc.api.CdcOptions;
-import org.apache.cassandra.cdc.api.CommitLogMarkers;
-import org.apache.cassandra.cdc.api.CommitLogProvider;
-import org.apache.cassandra.cdc.api.EventConsumer;
-import org.apache.cassandra.cdc.api.SchemaSupplier;
-import org.apache.cassandra.cdc.api.StatePersister;
-import org.apache.cassandra.cdc.api.TableIdLookup;
-import org.apache.cassandra.cdc.api.TokenRangeSupplier;
 import org.apache.cassandra.cdc.msg.CdcEvent;
 import org.apache.cassandra.cdc.state.CdcState;
 import org.apache.cassandra.cdc.stats.ICdcStats;
@@ -60,7 +52,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 @SuppressWarnings("unused") // external facing API
-public class Cdc implements AutoCloseable
+public class Cdc
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(Cdc.class);
 
@@ -222,7 +214,7 @@ public class Cdc implements AutoCloseable
 
                 // We need to close here to tidy things up with our statePersister; we're in a bad state but want to
                 // at least flush out what we have if we can.
-                close();
+                stop();
             }
         }
     }
@@ -414,20 +406,15 @@ public class Cdc implements AutoCloseable
     }
 
     /**
-     * {@link AutoCloseable} interface
-     *
-     * We're responsible for both the Cdc lifecycle and the statePersister's lifecycle here; we need to durably handle
-     * both and decouple exception state from the Cdc shutdown interfering with the {@link #statePersister}
+     * We're responsible for both the Cdc lifecycle and the {@link #statePersister} lifecycle here; we need to durably
+     * handle both and decouple exception state from the Cdc shutdown interfering with the {@link #statePersister}
      *
      * By default, we block on the active flag for at least our basic timeout time to try and let active cdc processes
      * finish.
      */
-    @Override
-    public void close()
+    public void stop()
     {
-        // We want to tie the shutdown of the statePersister to the atomic sentinel for shutting down cdc as well
-        // so we don't end up with repeated calls to StatePersister.stop. It's cleanly idempotent today but no
-        // guarantees that'll hold in the future.
+        // We want to tie flushing the statePersister to the atomic sentinel for shutting down cdc.
         if (isRunning.compareAndSet(true, false))
         {
             try
@@ -463,7 +450,7 @@ public class Cdc implements AutoCloseable
                 // Regardless of what happens with our Cdc processes, we always want to persist state to the DB.
                 // Exceptions are unhandled by design; if this fails, we want to bubble up the exception and let
                 // things Break Noisily.
-                statePersister.stop(true);
+                statePersister.persistBlocking();
             }
         }
     }
