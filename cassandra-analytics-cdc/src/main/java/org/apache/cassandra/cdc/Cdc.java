@@ -156,7 +156,9 @@ public class Cdc
     protected void scheduleRun(long delayMillis)
     {
         if (!isRunning.get() || isFinished())
+        {
             return;
+        }
 
         active.getAndUpdate((curr) -> {
             if (curr == null)

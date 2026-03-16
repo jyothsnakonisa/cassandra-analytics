@@ -56,7 +56,7 @@ import org.jetbrains.annotations.Nullable;
  */
 public class SidecarStatePersister implements StatePersister
 {
-    protected static final Logger LOGGER = LoggerFactory.getLogger(SidecarStatePersister.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(SidecarStatePersister.class);
 
     /* We group latest state by jobId/token range, so we persist independently. */
     protected final ConcurrentHashMap<PersistWrapper.Key, PersistWrapper> latestState = new ConcurrentHashMap<>();
@@ -83,6 +83,8 @@ public class SidecarStatePersister implements StatePersister
         this.cassandraClient = cassandraClient;
         this.asyncExecutor = asyncExecutor;
     }
+
+    // StatePersister implemented methods
 
     @Override
     public void persist(String jobId, int partitionId, @Nullable TokenRange tokenRange, @NotNull ByteBuffer buf)
@@ -291,6 +293,8 @@ public class SidecarStatePersister implements StatePersister
         }
     }
 
+    // helper classes
+
     protected static class PersistWrapper implements Comparable<PersistWrapper>
     {
         final String jobId;
@@ -334,10 +338,10 @@ public class SidecarStatePersister implements StatePersister
         }
 
         protected PersistWrapper(String jobId,
-                               int partitionId,
-                               @Nullable TokenRange tokenRange,
-                               ByteBuffer buf,
-                               long timestamp)
+                                 int partitionId,
+                                 @Nullable TokenRange tokenRange,
+                                 ByteBuffer buf,
+                                 long timestamp)
         {
             this.jobId = jobId;
             this.partitionId = partitionId;
